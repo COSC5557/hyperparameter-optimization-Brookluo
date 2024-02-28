@@ -5,8 +5,6 @@ Pkg.activate(".")
 using CSV
 using Plots
 using MLDataUtils
-using Random
-using Evolutionary
 
 using Distributed
 using DataFrames
@@ -17,6 +15,7 @@ workers()
 
 @sync @everywhere using AutoMLPipeline
 @sync @everywhere using DataFrames
+@sync @everywhere using Random
 
 
 # Load the data
@@ -24,8 +23,9 @@ df_red = CSV.read("winequality-red.csv", DataFrame)
 # names = CSV.read("winequality.names", DataFrame)
 
 # split the data into training and testing
-Random.seed!(42)
-train, test = splitobs(shuffleobs(df_red), at = 0.7)
+# Random.seed!(42)
+@everywhere rng = MersenneTwister(1234)
+train, test = splitobs(shuffleobs(df_red, rng=rng), at = 0.7)
 X_train = train[:, 1:end-1] 
 Y_train = train[:,end] |> Vector
 X_test = test[:, 1:end-1]
@@ -66,44 +66,73 @@ logistic = hp -> SKLearner("LogisticRegression", C=hp[1], random_state=0)
     # use evolution algorithm to find the best hyperparameters for this model
     # we will use accuracy as the metric
     # we will use 5 fold cross validation
-    # Random.seed!(42)
+    Random.seed!(rng, 1234)
     # first transform the data
     # use OneHotEncoder for categorical data and RobustScaler for numerical data
     pl = @pipeline disc |> (catf |> ohe) + (numf |> rb |> pca) |> learner
-    crossvalidate(pl, X, Y, "accuracy_score", nfolds=5, verbose=false)
+    mean, sd, _ = crossvalidate(pl, X, Y, "accuracy_score", nfolds=5, verbose=false)
+    return mean
 end
 
 
 # For Random Forest
 println("Random Forest")
 # Define hypterparameter function
-HPO_rf = hp -> HPOLearner(rf(hp), X_train, Y_train)
+@everywhere HPO_rf = hp -> HPOLearner(rf(round.(Int, hp)), X_train, Y_train)
 # Cannot use EA here, because inputs are all integer. Use random search instead
 # Random.seed!(42)
 x0 = [100, 10, 10]
 lower = [10, 1, 1]
-upper = [200, 30, 30]
-# random search
-n_samp = 1000
-params = hcat([rand(lower[i]:upper[i], n_samp) for i=1:3]...)
-# tab = DataFrame(fetch.([Threads.@spawn HPO_rf(params[i, :]) for i=1:100]))
-tab = @sync @distributed (vcat) for i=1:n_samp
-    HPO_rf(params[i, :])
-end
-tab = DataFrame(tab)
+upper = [300, 30, 30]
 # GA
+# using Evolutionary
 # res = Evolutionary.optimize(HPO_rf, BoxConstraints(lower, upper), x0,
 #                         GA(populationSize=100, crossoverRate=0.8, mutationRate=0.4),
 #                         Evolutionary.Options(reltol=1e-4, iterations=10, show_trace=true, parallelization=:thread))
 
-# For Gradient Boosting
-# Define hypterparameter function
-# HPO_gb = hp -> HPOLearner(gb(hp), X_train, Y_train)
-# Cannot use EA here, because inputs are all integer. Use random search instead
+@everywhere using Hyperopt
 
+# random search
+println("Random Search")
+ho = @time @hyperopt for i=50,
+        sampler = RandomSampler(rng), # This is default if none provided
+        n_est = 10:300,
+        max_depth = 1:30,
+        max_feature = 1:30
+    # print(i, "\t", n_est, "\t", max_depth, "\t", max_feature, "   \t")
+    @show HPO_rf([n_est, max_depth, max_feature]), [n_est, max_depth, max_feature]
+end
+ho
 
-# println(res)
+# use Hyperband for optimization
+println("Hyperband")
+hohb = @time @phyperopt for i=50,
+        sampler=Hyperband(R=50, η=3, inner=RandomSampler(rng)),
+        n_est = 10:300,
+        max_depth = 1:30,
+        max_feature = 1:30
+    if state !== nothing
+        n_est, max_depth, max_feature = state
+    end
+    # println(i, "\t", n_est, "\t", max_depth, "\t", max_feature, "   \n")
+    # res = Optim.optimize(HPO_rf, float([n_est, max_depth, max_feature]), float(lower), float(upper), NelderMead(), Optim.Options(f_calls_limit=round(Int, i)+1))
+    # @show Optim.minimum(res), Optim.minimizer(res)
+    # print(i, "\n")
+    @show HPO_rf([n_est, max_depth, max_feature]), [n_est, max_depth, max_feature]
+end
+hohb
 
-# HPO_gb = hp -> HPOLearner(gb, fit_transform!(tran, X_train, Y_train), Y_train)
-# HPO_svc = hp -> HPOLearner(svc, fit_transform!(tran, X_train, Y_train), Y_train)
-# HPO_mlp = hp -> HPOLearner(mlp, fit_transform!(tran, X_train, Y_train), Y_train)
+# Hyperband with Bayesian optimization
+println("Hyperband with Bayesian optimization")
+hohbbo = @time @phyperopt for i=50,
+        sampler=Hyperband(R=50, η=3, inner=BOHB(dims=[Hyperopt.Continuous(), Hyperopt.Continuous(), Hyperopt.Continuous()], random_sampler=RandomSampler(rng))),
+        n_est = 10:300,
+        max_depth = 1:30,
+        max_feature = 1:30
+    if state !== nothing
+        n_est, max_depth, max_feature = state
+    end
+    # print(i, "\n")
+    @show HPO_rf([n_est, max_depth, max_feature]), [n_est, max_depth, max_feature]
+end
+hohbbo
