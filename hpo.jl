@@ -161,16 +161,25 @@ function plotHyperopt(ho, figname)
     savefig(p, figname)
 end
 
-function writeTestResult(dir, params_name, all_ho, all_cv)
-    df_cv = DataFrame(all_cv)
-    df_ho = DataFrame(hcat([ho.minimizer for ho in all_ho]...)', params_name)
-    CSV.write(dir * "all_cv.csv", df_cv)
-    CSV.write(dir * "all_ho_params.csv", df_ho)
+function writeToCSV(filename, ho, colnames)
+    params = hcat(ho.history...)'
+    vals = [t[1] for t in ho.results]
+    CSV.write(filename, DataFrame(hcat(-vals, params), colnames))
 end
 
-plotHyperopt(hors, "../rf/rf_random_search.png")
-plotHyperopt(hohb, "../rf/rf_hyperband.png")
-plotHyperopt(hohbbo, "../rf/rf_hyperband_bo.png")
+function writeTestResult(dir, ho_params_name, sampler_name, all_ho, all_cv)
+    df_cv = DataFrame(all_cv)
+    df_ho = DataFrame(hcat([ho.minimizer for ho in all_ho]...)', ho_params_name[2:end])
+    CSV.write(dir * "all_cv.csv", df_cv)
+    CSV.write(dir * "all_ho_params.csv", df_ho)
+    for i in 1:length(all_ho)
+        writeToCSV(dir * sampler_name[i] * ".csv", all_ho[i], ho_params_name)
+    end
+end
+
+plotHyperopt(hors, "./rf/random_search.png")
+plotHyperopt(hohb, "./rf/hyperband.png")
+plotHyperopt(hohbbo, "./rf/hyperband_bo.png")
 
 # use with test data and do cross validation
 println("Cross validation")
@@ -193,22 +202,11 @@ p = boxplot(["Random Sampler"], -total_mean[1], ylabel="Accuracy", legend=false)
 boxplot!(p, ["Hyperband with Random Sampler"], -total_mean[2])
 boxplot!(p, ["Hyperband with BO"], -total_mean[3])
 plot!(p, legend=false, ylabel="Accuracy score")
-savefig(p, "../rf/rf_boxplot.png")
+savefig(p, "./rf/boxplot.png")
 
-writeTestResult("./rf/", ["n_estimators", "max_depth", "max_feature"], [hors, hohb, hohbbo], [m1, m2, m3])
-
-function writeToCSV(filename, ho, colnames)
-    params = hcat(ho.history...)'
-    vals = [t[1] for t in ho.results]
-    CSV.write(filename, DataFrame(hcat(-vals, params), colnames))
-end
-
-writeToCSV("./rf/rf_random_search.csv", hors,
-        ["accuracy", "n_estimators", "max_depth", "max_feature"])
-writeToCSV("./rf/rf_hyperband_rs.csv", hohb,
-        ["accuracy", "n_estimators", "max_depth", "max_feature"])
-writeToCSV("./rf/rf_hyperband_bo.csv", hohbbo,
-        ["accuracy", "n_estimators", "max_depth", "max_feature"])
+writeTestResult("./rf/", ["accuracy", "n_estimators", "max_depth", "max_feature"],
+                ["random_search", "hyperband_rs", "hyperband_bo"],
+                [hors, hohb, hohbbo], [m1, m2, m3])
 
 
 # For Gradient Boosting
@@ -219,7 +217,6 @@ n_est_range = 10:500
 lr_range = LinRange(0.01, 0.5, 100)
 max_depth_range = 1:30
 
-
 # random search
 println("Random Search")
 hors = @time @hyperopt for i=50,
@@ -229,7 +226,7 @@ hors = @time @hyperopt for i=50,
         max_depth = max_depth_range
     # print(i, "\t", n_est, "\t", max_depth, "\t", max_feature, "   \t")
     params = [n_est, lr, max_depth]
-    @show HPO_gb(params), params
+    HPO_gb(params), params
 end
 
 # use Hyperband for optimization
@@ -258,26 +255,37 @@ hohbbo = @time @hyperopt for i=50,
     if !(n_est in n_est_range) || !(lr in lr_range) || !(max_depth in max_depth_range)
         # to prevent type error and circumvent bug in their code
         # the bug will step out of the search space
-        @show NaN, [n_est, max_depth, max_feature]
+        @show NaN, [n_est, lr, max_depth]
     else
         @show HPO_gb([n_est, lr, max_depth]), [n_est, lr, max_depth]
     end
 end
 
-plotHyperopt(hors, "../gb/gb_random_search.png")
-plotHyperopt(hohb, "../gb/gb_hyperband.png")
-plotHyperopt(hohbbo, "../gb/gb_hyperband_bo.png")
+plotHyperopt(hors, "./gb/random_search.png")
+plotHyperopt(hohb, "./gb/hyperband.png")
+plotHyperopt(hohbbo, "./gb/hyperband_bo.png")
 # cross validation
 println("Cross validation")
 println("Random Sampler")
 println(hors.minimizer)
 Random.seed!(42)
-m = crossvalidate(gb(hors.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
+m1 = crossvalidate(gb(hors.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
 println("Hyperband with Random Sampler")
 println(hohb.minimizer)
 Random.seed!(42)
-crossvalidate(gb(hohb.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
+m2 = crossvalidate(gb(hohb.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
 println("Hyperband with BO")
 println(hohbbo.minimizer)
 Random.seed!(42)
-crossvalidate(gb(hohbbo.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
+m3 = crossvalidate(gb(hohbbo.minimizer), X_test_trans, Y_test, "accuracy_score", nfolds=5, verbose=true)
+total_mean = [[t[1] for t in h.results] for h in [hors, hohb, hohbbo]]
+# drop missing values
+total_mean = [t[.!isnan.(t)] for t in total_mean]
+p = boxplot(["Random Sampler"], -total_mean[1], ylabel="Accuracy", legend=false)
+boxplot!(p, ["Hyperband with Random Sampler"], -total_mean[2])
+boxplot!(p, ["Hyperband with BO"], -total_mean[3])
+plot!(p, legend=false, ylabel="Accuracy score")
+savefig(p, "./gb/boxplot.png")
+writeTestResult("./gb/", ["accuracy", "n_estimators", "learning_rate", "max_depth"],
+                ["random_search", "hyperband_rs", "hyperband_bo"],
+                [hors, hohb, hohbbo], [m1, m2, m3])
