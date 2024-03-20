@@ -41,7 +41,6 @@ Y_test = test[:, end] |> Vector
 rf = hp -> SKLearner("RandomForestClassifier", n_estimators=hp[1], max_depth=hp[2], max_features=hp[3], random_state=0)
 gb = hp -> SKLearner("GradientBoostingClassifier", n_estimators=Int(hp[1]), learning_rate=hp[2], max_depth=Int(hp[3]), random_state=0)
 svc = hp -> SKLearner("SVC", C=hp[1], kernel=hp[2], degree=hp[3], random_state=0)
-logistic = hp -> SKLearner("LogisticRegression", C=hp[1], random_state=0)
 
 #### Decomposition
 pca = SKPreprocessor("PCA", Dict(:n_components => 5, :random_state => 0))
@@ -304,3 +303,13 @@ end
 analyzePerf(svc, "./svm/", ["accuracy", "C", "kernel", "degree"],
     ["random_search", "hyperband_rs"],
     [hors, hohb], X_test_trans, Y_test)
+
+
+# Compare performance for all models
+df_rf = CSV.read("./rf/hyperband_rs.csv", DataFrame)
+df_gb = CSV.read("./gb/hyperband_rs.csv", DataFrame)
+df_svm = CSV.read("./svm/hyperband_rs.csv", DataFrame)
+p = boxplot(["Random Forest"], df_rf.accuracy, ylabel="Accuracy", legend=false)
+boxplot!(p, ["Gradient Boosting"], df_gb.accuracy, ylabel="Accuracy", legend=false)
+boxplot!(p, ["SVM"], df_svm.accuracy, ylabel="Accuracy", legend=false)
+savefig(p, "all_hbrs_perf_boxplot.png")
