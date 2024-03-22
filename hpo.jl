@@ -6,7 +6,7 @@ using CSV
 using Plots
 using MLDataUtils
 
-using Distributed
+# using Distributed
 using DataFrames
 
 # Add workers
@@ -131,6 +131,7 @@ function analyzePerf(model, dir, ho_params_name, sampler_name, all_ho, X_test, Y
     # println(cv_res)
     plot!(p, legend=false, ylabel="Accuracy score")
     savefig(p, dir * "boxplot.png")
+    plot!(perfplot, legend=true, ylabel="Accuracy score", xlims=(0, 50), ylims=(0.4, 0.7))
     savefig(perfplot, dir * "perfplot.png")
     writeTestResult(dir, ho_params_name, sampler_name, all_ho, cv_res)
 end
