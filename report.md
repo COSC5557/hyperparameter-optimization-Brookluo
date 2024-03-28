@@ -22,6 +22,11 @@ First, the features are discretized into categorical and numerical variables bas
 
 The hyperparameter optimization is performed using the `Hyperopt` package. The `Hyperopt` package provides a convenient and clean API to achieve HPO with various sampler. For each model, I used three samplers for HPO: random sampler (RS), Hyperband with random sampler (RSHB) and Hyperband with Bayesian sampler (BOHB). Since `Hyperopt`'s Bayesian sampler can only be used for continuous variables, SVM is not included in the Bayesian sampler run. Since we want to maximize the accuracy, the objective function is set to minimize the negative accuracy. The maximum number of iterations is set to 50 for random sampler, and the resource for HB is R=50 with n=3. The best hyperparameters are selected based on the best accuracy. The model is evaluated using 5-fold cross-validation. The accuracy is used as the metric to evaluate the model performance.
 
+Nested resampling is used in the HPO process. The outer sampling process is `hpo.jl:31`, where data is splited into training and testing sets. The inner sampling sampling is `hpo.jl:78`, where each Hyperparameter set evaluation is performed with 5-fold CV with the training data. Testing and outer sampling performance evaluation is done on `hpo.jl:124`. The outer sampling was not repeated because of two reasons:
+1. The current sampling for these three learners with three (2 for SVM) HPO methods takes a very long time (~1 hour to run)
+2. Since the parameter spaces to sample from are large, the algorithm should be able to have explored parameter set with good generalizability.
+To ensure reproducibility, I set seed for each sampling and CV. Due to current interface limitation, this behavior can be non-ideal with inner sampling.
+
 ## Results
 
 ### Random Forest
